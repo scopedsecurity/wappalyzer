@@ -6,52 +6,13 @@ const args = process.argv.slice(2)
 
 const options = {}
 
-let url
+let urls
 let arg
 
-const aliases = {
-  a: 'userAgent',
-  b: 'batchSize',
-  d: 'debug',
-  t: 'delay',
-  h: 'help',
-  D: 'maxDepth',
-  m: 'maxUrls',
-  p: 'probe',
-  P: 'pretty',
-  r: 'recursive',
-  w: 'maxWait',
-  n: 'noScripts',
-}
+arg = args.shift()
+urls = arg.split(',')
 
-while (true) {
-  // eslint-disable-line no-constant-condition
-  arg = args.shift()
-
-  if (!arg) {
-    break
-  }
-
-  const matches = /^-?-([^=]+)(?:=(.+)?)?/.exec(arg)
-
-  if (matches) {
-    const key =
-      aliases[matches[1]] ||
-      matches[1].replace(/-\w/g, (_matches) => _matches[1].toUpperCase())
-    // eslint-disable-next-line no-nested-ternary
-    const value = matches[2]
-      ? matches[2]
-      : args[0] && !args[0].startsWith('-')
-      ? args.shift()
-      : true
-
-    options[key] = value
-  } else {
-    url = arg
-  }
-}
-
-if (!url || options.help) {
+if (!urls || options.help) {
   process.stdout.write(`Usage:
   wappalyzer <url> [options]
 
@@ -80,29 +41,25 @@ Options:
   process.exit(1)
 }
 
-;(async function () {
-  const wappalyzer = new Wappalyzer(options)
 
+;(async function() {
+  const wappalyzer = new Wappalyzer()
   try {
     await wappalyzer.init()
 
-    const site = await wappalyzer.open(url)
-
-    const results = await site.analyze()
-
-    process.stdout.write(
-      `${JSON.stringify(results, null, options.pretty ? 2 : null)}\n`
+    const results = await Promise.all(
+      urls.map(async (url) => ({
+        url,
+        results: await wappalyzer.open(url).analyze()
+      }))
     )
 
-    await wappalyzer.destroy()
-
-    process.exit(0)
+  process.stdout.write(
+      `${JSON.stringify(results, null, options.pretty ? 2 : null)}\n`
+    )
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error(error)
-
-    await wappalyzer.destroy()
-
-    process.exit(1)
   }
+
+  await wappalyzer.destroy()
 })()
