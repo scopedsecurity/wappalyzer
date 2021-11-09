@@ -1,9 +1,11 @@
 const { URL } = require('url')
+const os = require('os')
 const fs = require('fs')
 const dns = require('dns').promises
 const path = require('path')
 const http = require('http')
 const https = require('https')
+const puppeteer = require('puppeteer')
 const Wappalyzer = require('./wappalyzer')
 
 const { setTechnologies, setCategories, analyze, analyzeManyToMany, resolve } =
@@ -13,11 +15,9 @@ function next() {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
-const { AWS_LAMBDA_FUNCTION_NAME, CHROMIUM_BIN, CHROMIUM_DATA_DIR } =
-  process.env
+const { CHROMIUM_BIN, CHROMIUM_DATA_DIR, CHROMIUM_WEBSOCKET } = process.env
 
-let puppeteer
-let chromiumArgs = [
+const chromiumArgs = [
   '--no-sandbox',
   '--no-zygote',
   '--disable-gpu',
@@ -26,17 +26,9 @@ let chromiumArgs = [
   '--disable-web-security',
   `--user-data-dir=${CHROMIUM_DATA_DIR || '/tmp/chromium'}`,
 ]
-let chromiumBin = CHROMIUM_BIN
 
-if (AWS_LAMBDA_FUNCTION_NAME) {
-  const chromium = require('chrome-aws-lambda')
-
-  ;({ puppeteer } = chromium)
-
-  chromiumArgs = chromiumArgs.concat(chromium.args)
-  chromiumBin = chromium.executablePath
-} else {
-  puppeteer = require('puppeteer')
+if (os.arch() === 'arm64') {
+  chromiumArgs.push('--single-process')
 }
 
 const extensions = /^([^.]+$|\.(asp|aspx|cgi|htm|html|jsp|php)$)/
@@ -342,12 +334,20 @@ class Driver {
     this.log('Launching browser...')
 
     try {
-      this.browser = await puppeteer.launch({
-        ignoreHTTPSErrors: true,
-        acceptInsecureCerts: true,
-        args: chromiumArgs,
-        executablePath: await chromiumBin,
-      })
+      if (CHROMIUM_WEBSOCKET) {
+        this.browser = await puppeteer.connect({
+          ignoreHTTPSErrors: true,
+          acceptInsecureCerts: true,
+          browserWSEndpoint: CHROMIUM_WEBSOCKET,
+        })
+      } else {
+        this.browser = await puppeteer.launch({
+          ignoreHTTPSErrors: true,
+          acceptInsecureCerts: true,
+          args: chromiumArgs,
+          executablePath: CHROMIUM_BIN,
+        })
+      }
 
       this.browser.on('disconnected', async () => {
         this.log('Browser disconnected')
@@ -415,6 +415,7 @@ class Site {
     }
 
     this.analyzedUrls = {}
+    this.analyzedXhr = {}
     this.analyzedRequires = {}
     this.detections = []
 
@@ -459,7 +460,7 @@ class Site {
   promiseTimeout(
     promise,
     fallback,
-    errorMessage = 'Operation took too long to respond',
+    errorMessage = 'Operation took too long to complete',
     maxWait = this.options.maxWait
   ) {
     let timeout = null
@@ -477,7 +478,13 @@ class Site {
 
           error.code = 'PROMISE_TIMEOUT_ERROR'
 
-          fallback !== undefined ? resolve(fallback) : reject(error)
+          if (fallback !== undefined) {
+            this.error(error)
+
+            resolve(fallback)
+          } else {
+            reject(error)
+          }
         }, maxWait)
       }),
       promise.then((value) => {
@@ -505,7 +512,6 @@ class Site {
 
     if (!this.browser) {
       await this.initDriver()
-
       if (!this.browser) {
         throw new Error('Browser closed')
       }
@@ -544,7 +550,14 @@ class Site {
             setTimeout(async () => {
               xhrDebounce.splice(xhrDebounce.indexOf(hostname), 1)
 
-              await this.onDetect(url, await analyze({ xhr: hostname }))
+              this.analyzedXhr[url.hostname] =
+                this.analyzedXhr[url.hostname] || []
+
+              if (!this.analyzedXhr[url.hostname].includes(hostname)) {
+                this.analyzedXhr[url.hostname].push(hostname)
+
+                await this.onDetect(url, await analyze({ xhr: hostname }))
+              }
             }, 1000)
           }
         }
@@ -574,6 +587,15 @@ class Site {
 
     page.on('response', async (response) => {
       try {
+        if (
+          response.frame().url() === url.href &&
+          response.request().resourceType() === 'script'
+        ) {
+          const scripts = await response.text()
+
+          await this.onDetect(response.url(), await analyze({ scripts }))
+        }
+
         if (response.url() === url.href) {
           this.analyzedUrls[url.href] = {
             status: response.status(),
@@ -632,119 +654,6 @@ class Site {
 
       // page.on('console', (message) => this.log(message.text()))
 
-      // Links
-      const links = !this.options.recursive
-        ? []
-        : await this.promiseTimeout(
-            (
-              await this.promiseTimeout(
-                page.evaluateHandle(() =>
-                  Array.from(document.getElementsByTagName('a')).map(
-                    ({ hash, hostname, href, pathname, protocol, rel }) => ({
-                      hash,
-                      hostname,
-                      href,
-                      pathname,
-                      protocol,
-                      rel,
-                    })
-                  )
-                ),
-                { jsonValue: () => [] },
-                'Timeout (links)'
-              )
-            ).jsonValue(),
-            [],
-            'Timeout (links)'
-          )
-
-      // CSS
-      const css = await this.promiseTimeout(
-        (
-          await this.promiseTimeout(
-            page.evaluateHandle((maxRows) => {
-              const css = []
-
-              try {
-                if (!document.styleSheets.length) {
-                  return ''
-                }
-
-                for (const sheet of Array.from(document.styleSheets)) {
-                  for (const rules of Array.from(sheet.cssRules)) {
-                    css.push(rules.cssText)
-
-                    if (css.length >= maxRows) {
-                      break
-                    }
-                  }
-                }
-              } catch (error) {
-                return ''
-              }
-
-              return css.join('\n')
-            }, this.options.htmlMaxRows),
-            { jsonValue: () => '' },
-            'Timeout (css)'
-          )
-        ).jsonValue(),
-        '',
-        'Timeout (css)'
-      )
-
-      // Script tags
-      const scripts = await this.promiseTimeout(
-        (
-          await this.promiseTimeout(
-            page.evaluateHandle(() =>
-              Array.from(document.getElementsByTagName('script'))
-                .map(({ src }) => src)
-                .filter((src) => src)
-            ),
-            { jsonValue: () => [] },
-            'Timeout (scripts)'
-          )
-        ).jsonValue(),
-        [],
-        'Timeout (scripts)'
-      )
-
-      // Meta tags
-      const meta = await this.promiseTimeout(
-        (
-          await this.promiseTimeout(
-            page.evaluateHandle(() =>
-              Array.from(document.querySelectorAll('meta')).reduce(
-                (metas, meta) => {
-                  const key =
-                    meta.getAttribute('name') || meta.getAttribute('property')
-
-                  if (key) {
-                    metas[key.toLowerCase()] = [meta.getAttribute('content')]
-                  }
-
-                  return metas
-                },
-                {}
-              )
-            ),
-            { jsonValue: () => [] },
-            'Timeout (meta)'
-          )
-        ).jsonValue(),
-        [],
-        'Timeout (meta)'
-      )
-
-      // JavaScript
-      const js = this.options.noScripts
-        ? []
-        : await this.promiseTimeout(getJs(page), [], 'Timeout (js)')
-
-      // DOM
-      const dom = await this.promiseTimeout(getDom(page), [], 'Timeout (dom)')
-
       // Cookies
       const cookies = (await page.cookies()).reduce(
         (cookies, { name, value }) => ({
@@ -755,7 +664,7 @@ class Site {
       )
 
       // HTML
-      let html = await page.content()
+      let html = await this.promiseTimeout(page.content(), '', 'Timeout (html)')
 
       if (this.options.htmlMaxCols && this.options.htmlMaxRows) {
         const batches = []
@@ -778,11 +687,165 @@ class Site {
         html = batches.join('\n')
       }
 
+      let links = []
+      let text = ''
+      let css = ''
+      let scriptSrc = []
+      let scripts = []
+      let meta = []
+      let js = []
+      let dom = []
+
+      if (html) {
+        // Links
+        links = !this.options.recursive
+          ? []
+          : await this.promiseTimeout(
+              (
+                await this.promiseTimeout(
+                  page.evaluateHandle(() =>
+                    Array.from(document.getElementsByTagName('a')).map(
+                      ({ hash, hostname, href, pathname, protocol, rel }) => ({
+                        hash,
+                        hostname,
+                        href,
+                        pathname,
+                        protocol,
+                        rel,
+                      })
+                    )
+                  ),
+                  { jsonValue: () => [] },
+                  'Timeout (links)'
+                )
+              ).jsonValue(),
+              [],
+              'Timeout (links)'
+            )
+
+        // Text
+        text = await this.promiseTimeout(
+          (
+            await this.promiseTimeout(
+              page.evaluateHandle(() =>
+                // eslint-disable-next-line unicorn/prefer-text-content
+                document.body.innerText.replace(/\s+/g, ' ').slice(0, 25000)
+              ),
+              { jsonValue: () => '' },
+              'Timeout (text)'
+            )
+          ).jsonValue(),
+          '',
+          'Timeout (text)'
+        )
+
+        // CSS
+        css = await this.promiseTimeout(
+          (
+            await this.promiseTimeout(
+              page.evaluateHandle((maxRows) => {
+                const css = []
+
+                try {
+                  if (!document.styleSheets.length) {
+                    return ''
+                  }
+
+                  for (const sheet of Array.from(document.styleSheets)) {
+                    for (const rules of Array.from(sheet.cssRules)) {
+                      css.push(rules.cssText)
+
+                      if (css.length >= maxRows) {
+                        break
+                      }
+                    }
+                  }
+                } catch (error) {
+                  return ''
+                }
+
+                return css.join('\n')
+              }, this.options.htmlMaxRows),
+              { jsonValue: () => '' },
+              'Timeout (css)'
+            )
+          ).jsonValue(),
+          '',
+          'Timeout (css)'
+        )
+
+        // Script tags
+        ;[scriptSrc, scripts] = await this.promiseTimeout(
+          (
+            await this.promiseTimeout(
+              page.evaluateHandle(() => {
+                const nodes = Array.from(
+                  document.getElementsByTagName('script')
+                )
+
+                return [
+                  nodes
+                    .filter(
+                      ({ src }) =>
+                        src && !src.startsWith('data:text/javascript;')
+                    )
+                    .map(({ src }) => src),
+                  nodes
+                    .map((node) => node.textContent)
+                    .filter((script) => script),
+                ]
+              }),
+              { jsonValue: () => [] },
+              'Timeout (scripts)'
+            )
+          ).jsonValue(),
+          [],
+          'Timeout (scripts)'
+        )
+
+        // Meta tags
+        meta = await this.promiseTimeout(
+          (
+            await this.promiseTimeout(
+              page.evaluateHandle(() =>
+                Array.from(document.querySelectorAll('meta')).reduce(
+                  (metas, meta) => {
+                    const key =
+                      meta.getAttribute('name') || meta.getAttribute('property')
+
+                    if (key) {
+                      metas[key.toLowerCase()] = [meta.getAttribute('content')]
+                    }
+
+                    return metas
+                  },
+                  {}
+                )
+              ),
+              { jsonValue: () => [] },
+              'Timeout (meta)'
+            )
+          ).jsonValue(),
+          [],
+          'Timeout (meta)'
+        )
+
+        // JavaScript
+        js = this.options.noScripts
+          ? []
+          : await this.promiseTimeout(getJs(page), [], 'Timeout (js)')
+
+        // DOM
+        dom = await this.promiseTimeout(getDom(page), [], 'Timeout (dom)')
+      }
+
       this.cache[url.href] = {
         page,
         html,
+        text,
         cookies,
         scripts,
+        scriptSrc,
         meta,
       }
 
@@ -796,8 +859,10 @@ class Site {
               url,
               cookies,
               html,
+              text,
               css,
               scripts,
+              scriptSrc,
               meta,
             }),
           ])
@@ -1070,21 +1135,30 @@ class Site {
     if (this.cache[url.href]) {
       const resolved = resolve(this.detections)
 
-      const requires = Wappalyzer.requires.filter(({ name, technologies }) =>
-        resolved.some(({ name: _name }) => _name === name)
-      )
+      const requires = [
+        ...Wappalyzer.requires.filter(({ name }) =>
+          resolved.some(({ name: _name }) => _name === name)
+        ),
+        ...Wappalyzer.categoryRequires.filter(({ categoryId }) =>
+          resolved.some(({ categories }) =>
+            categories.some(({ id }) => id === categoryId)
+          )
+        ),
+      ]
 
       await Promise.all(
-        Object.keys(requires).map(async (name) => {
-          const technologies = Wappalyzer.requires[name].technologies
+        requires.map(async ({ name, categoryId, technologies }) => {
+          const id = categoryId
+            ? `category:${categoryId}`
+            : `technology:${name}`
 
           this.analyzedRequires[url.href] =
             this.analyzedRequires[url.href] || []
 
-          if (!this.analyzedRequires[url.href].includes(name)) {
-            this.analyzedRequires[url.href].push(name)
+          if (!this.analyzedRequires[url.href].includes(id)) {
+            this.analyzedRequires[url.href].push(id)
 
-            const { page, cookies, html, css, scripts, meta } =
+            const { page, cookies, html, text, css, scripts, scriptSrc, meta } =
               this.cache[url.href]
 
             const js = await this.promiseTimeout(
@@ -1109,8 +1183,10 @@ class Site {
                       url,
                       cookies,
                       html,
+                      text,
                       css,
                       scripts,
+                      scriptSrc,
                       meta,
                     },
                     technologies

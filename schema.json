@@ -113,6 +113,19 @@
           }
         ]
       },
+      "text": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/non-empty-non-blank-string"
+            }
+          },
+          {
+            "$ref": "#/definitions/non-empty-non-blank-string"
+          }
+        ]
+      },
       "css": {
         "oneOf": [
           {
@@ -204,6 +217,19 @@
           }
         ]
       },
+      "requiresCategory": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          {
+            "type": "number"
+          }
+        ]
+      },
       "meta": {
         "type": "object",
         "additionalProperties": false,
@@ -214,6 +240,19 @@
             "type": "string"
           }
         }
+      },
+      "scriptSrc": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/non-empty-non-blank-string"
+            }
+          },
+          {
+            "$ref": "#/definitions/non-empty-non-blank-string"
+          }
+        ]
       },
       "scripts": {
         "oneOf": [

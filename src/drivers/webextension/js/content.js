@@ -176,6 +176,10 @@ const Content = {
         {}
       )
 
+      // Text
+      // eslint-disable-next-line unicorn/prefer-text-content
+      const text = document.body.innerText.replace(/\s+/g, ' ').slice(0, 25000)
+
       // CSS rules
       let css = []
 
@@ -196,10 +200,15 @@ const Content = {
       css = css.join('\n')
 
       // Script tags
-      const scripts = Array.from(document.scripts)
-        .filter(({ src }) => src)
+      const scriptNodes = Array.from(document.scripts)
+
+      const scriptSrc = scriptNodes
+        .filter(({ src }) => src && !src.startsWith('data:text/javascript;'))
         .map(({ src }) => src)
-        .filter((script) => script.indexOf('data:text/javascript;') !== 0)
+
+      const scripts = scriptNodes
+        .map((node) => node.textContent)
+        .filter((script) => script)
 
       // Meta tags
       const meta = Array.from(document.querySelectorAll('meta')).reduce(
@@ -240,7 +249,31 @@ const Content = {
         }
       }
 
-      Content.cache = { html, css, scripts, meta, cookies }
+      // Detect Facebook Ads
+      if (/^(www\.)?facebook\.com$/.test(location.hostname)) {
+        const ads = document.querySelectorAll('a[aria-label="Advertiser"]')
+
+        for (const ad of ads) {
+          const urls = [
+            ...new Set([
+              `https://${decodeURIComponent(
+                ad.href.split(/^.+\?u=https%3A%2F%2F/).pop()
+              )
+                .split('/')
+                .shift()}`,
+
+              // eslint-disable-next-line unicorn/prefer-text-content
+              `https://${ad.innerText.split('\n').pop()}`,
+            ]),
+          ]
+
+          urls.forEach((url) =>
+            Content.driver('detectTechnology', [url, 'Facebook Ads'])
+          )
+        }
+      }
+
+      Content.cache = { html, text, css, scriptSrc, scripts, meta, cookies }
 
       await Content.driver('onContentLoad', [
         url,
@@ -322,19 +355,20 @@ const Content = {
 
   async analyzeRequires(url, requires) {
     await Promise.all(
-      Object.keys(requires).map(async (name) => {
-        if (!Content.analyzedRequires.includes(name)) {
-          Content.analyzedRequires.push(name)
+      requires.map(async ({ name, categoryId, technologies }) => {
+        const id = categoryId ? `category:${categoryId}` : `technology:${name}`
 
-          const technologies = requires[name].technologies
+        if (!Content.analyzedRequires.includes(id)) {
+          Content.analyzedRequires.push(id)
 
           await Promise.all([
-            Content.onGetTechnologies(technologies, name),
+            Content.onGetTechnologies(technologies, name, categoryId),
             Content.driver('onContentLoad', [
               url,
               Content.cache,
               Content.language,
               name,
+              categoryId,
             ]),
           ])
         }
@@ -346,15 +380,15 @@ const Content = {
    * Callback for getTechnologies
    * @param {Array} technologies
    */
-  async onGetTechnologies(technologies = [], requires) {
+  async onGetTechnologies(technologies = [], requires, categoryRequires) {
     const url = location.href
 
     const js = await getJs(technologies)
     const dom = await getDom(technologies)
 
     await Promise.all([
-      Content.driver('analyzeJs', [url, js, requires]),
-      Content.driver('analyzeDom', [url, dom, requires]),
+      Content.driver('analyzeJs', [url, js, requires, categoryRequires]),
+      Content.driver('analyzeDom', [url, dom, requires, categoryRequires]),
     ])
   },
 }

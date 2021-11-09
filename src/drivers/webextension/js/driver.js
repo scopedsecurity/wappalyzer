@@ -19,6 +19,20 @@ const hostnameIgnoreList =
 
 const xhrDebounce = []
 
+let xhrAnalyzed = {}
+
+const scriptsPending = []
+
+function getRequiredTechnologies(name, categoryId) {
+  return name
+    ? Wappalyzer.requires.find(({ name: _name }) => _name === name).technologies
+    : categoryId
+    ? Wappalyzer.categoryRequires.find(
+        ({ categoryId: _categoryId }) => _categoryId === categoryId
+      ).technologies
+    : undefined
+}
+
 const Driver = {
   lastPing: Date.now(),
 
@@ -66,6 +80,11 @@ const Driver = {
       { urls: ['http://*/*', 'https://*/*'], types: ['main_frame'] },
       ['responseHeaders']
     )
+
+    chrome.webRequest.onCompleted.addListener(Driver.onScriptRequestComplete, {
+      urls: ['http://*/*', 'https://*/*'],
+      types: ['script'],
+    })
 
     chrome.webRequest.onCompleted.addListener(Driver.onXhrRequestComplete, {
       urls: ['http://*/*', 'https://*/*'],
@@ -191,10 +210,10 @@ const Driver = {
    * @param {String} url
    * @param {Array} js
    */
-  async analyzeJs(url, js, requires) {
-    const technologies = requires
-      ? Wappalyzer.requires[requires].technologies
-      : Wappalyzer.technologies
+  async analyzeJs(url, js, requires, categoryRequires) {
+    const technologies =
+      getRequiredTechnologies(requires, categoryRequires) ||
+      Wappalyzer.technologies
 
     return Driver.onDetect(
       url,
@@ -220,10 +239,10 @@ const Driver = {
    * @param {String} url
    * @param {Array} dom
    */
-  async analyzeDom(url, dom, requires) {
-    const technologies = requires
-      ? Wappalyzer.requires[requires].technologies
-      : Wappalyzer.technologies
+  async analyzeDom(url, dom, requires, categoryRequires) {
+    const technologies =
+      getRequiredTechnologies(requires, categoryRequires) ||
+      Wappalyzer.technologies
 
     return Driver.onDetect(
       url,
@@ -401,6 +420,30 @@ const Driver = {
   },
 
   /**
+   * Analyse scripts
+   * @param {Object} request
+   */
+  async onScriptRequestComplete(request) {
+    if (await Driver.isDisabledDomain(request.url)) {
+      return
+    }
+
+    if (scriptsPending.includes(request.url)) {
+      scriptsPending.splice(scriptsPending.indexOf(request.url), 1)
+    } else if (request.statusCode === 200) {
+      scriptsPending.push(request.url)
+
+      const response = await fetch(request.url)
+
+      const scripts = await response.text()
+
+      Driver.onDetect(request.documentUrl, await analyze({ scripts })).catch(
+        Driver.error
+      )
+    }
+  },
+
+  /**
    * Analyse XHR request hostnames
    * @param {Object} request
    */
@@ -417,16 +460,34 @@ const Driver = {
       return
     }
 
+    let originHostname
+
+    try {
+      ;({ hostname: originHostname } = new URL(request.originUrl))
+    } catch (error) {
+      return
+    }
+
     if (!xhrDebounce.includes(hostname)) {
       xhrDebounce.push(hostname)
 
       setTimeout(async () => {
         xhrDebounce.splice(xhrDebounce.indexOf(hostname), 1)
 
-        Driver.onDetect(
-          request.originUrl || request.initiator,
-          await analyze({ xhr: hostname })
-        ).catch(Driver.error)
+        xhrAnalyzed[originHostname] = xhrAnalyzed[originHostname] || []
+
+        if (!xhrAnalyzed[originHostname].includes(hostname)) {
+          xhrAnalyzed[originHostname].push(hostname)
+
+          if (Object.keys(xhrAnalyzed).length > 500) {
+            xhrAnalyzed = {}
+          }
+
+          Driver.onDetect(
+            request.originUrl || request.initiator,
+            await analyze({ xhr: hostname })
+          ).catch(Driver.error)
+        }
       }, 1000)
     }
   },
@@ -437,7 +498,7 @@ const Driver = {
    * @param {Object} items
    * @param {String} language
    */
-  async onContentLoad(url, items, language, requires) {
+  async onContentLoad(url, items, language, requires, categoryRequires) {
     try {
       items.cookies = items.cookies || {}
 
@@ -450,12 +511,11 @@ const Driver = {
         ({ name, value }) => (items.cookies[name.toLowerCase()] = [value])
       )
 
+      const technologies = getRequiredTechnologies(requires, categoryRequires)
+
       await Driver.onDetect(
         url,
-        await analyze(
-          { url, ...items },
-          requires ? Wappalyzer.requires[requires].technologies : undefined
-        ),
+        await analyze({ url, ...items }, technologies),
         language,
         true
       )
@@ -597,9 +657,16 @@ const Driver = {
       return detection
     })
 
-    const requires = Wappalyzer.requires.filter(({ name, technologies }) =>
-      resolved.some(({ name: _name }) => _name === name)
-    )
+    const requires = [
+      ...Wappalyzer.requires.filter(({ name }) =>
+        resolved.some(({ name: _name }) => _name === name)
+      ),
+      ...Wappalyzer.categoryRequires.filter(({ categoryId }) =>
+        resolved.some(({ categories }) =>
+          categories.some(({ id }) => id === categoryId)
+        )
+      ),
+    ]
 
     try {
       await Driver.content(url, 'analyzeRequires', [url, requires])
@@ -839,6 +906,8 @@ const Driver = {
     Driver.cache.hostnames = {}
     Driver.cache.tabs = {}
 
+    xhrAnalyzed = {}
+
     await setOption('hostnames', {})
   },
 
@@ -889,7 +958,7 @@ const Driver = {
       const count = Object.keys(urls).length
 
       if (count && (count >= 25 || Driver.lastPing < Date.now() - expiry)) {
-        await Driver.post('https://api.wappalyzer.com/ping/v2/', {
+        await Driver.post('https://api.wappalyzer.com/v2/ping/', {
           version: chrome.runtime.getManifest().version,
           urls,
         })

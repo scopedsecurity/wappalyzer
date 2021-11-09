@@ -22,7 +22,7 @@ If you don't have time to configure, host, debug and maintain your own infrastru
 ## Quick start
 
 ```sh
-git clone https://github.com/aliasio/wappalyzer
+git clone https://github.com/AliasIO/wappalyzer.git
 cd wappalyzer
 yarn install
 yarn run link
@@ -91,14 +91,17 @@ Patterns (regular expressions) are kept in [`src/technologies/`](https://github.
     "X-Powered-By": "Example"
   },
   "html": "<link[^>]example\\.css",
+  "text": "\bexample\b",
   "css": "\\.example-class",
   "robots": "Disallow: /unique-path/",
   "implies": "PHP\\;confidence:50",
   "requires": "WordPress",
+  "requiresCategory": "Ecommerce",
   "meta": {
     "generator": "(?:Example|Another Example)"
   },
-  "script": "example-([0-9.]+)\\.js\\;confidence:50\\;version:\\1",
+  "scriptSrc": "example-([0-9.]+)\\.js\\;confidence:50\\;version:\\1",
+  "scripts": "function webpackJsonpCallback\\(data\\) {",
   "url": "example\\.com",
   "xhr": "example\\.com",
   "oss": true,
@@ -254,7 +257,15 @@ Plus any of:
       <td>
         Similar to implies but detection only runs if the required technology has been identified. Useful for themes for a specific CMS. 
       </td>
-      <td><code>"WordPres"</code></td>
+      <td><code>"WordPress"</code></td>
+    </tr>   
+    <tr>
+      <td><code>requiresCategory</code></td>
+      <td>String | Array</td>
+      <td>
+        Similar to requires; detection only runs if a technology in the required category has been identified.
+      </td>
+      <td><code>"Ecommerce"</code></td>
     </tr>   
     <tr>
       <td><code>excludes</code></td>
@@ -343,6 +354,14 @@ Plus any of:
       <td><code>"&lt;a [^&gt;]*href=\"index.html"</code></td>
     </tr>
     <tr>
+      <td><code>text</code></td>
+      <td>String | Array</td>
+      <td>
+        Matches plain text. Should only be used in very specific cases where other methods can't be used.
+      </td>
+      <td><code>\bexample\b</code></td>
+    </tr>
+    <tr>
       <td><code>css</code></td>
       <td>String | Array</td>
       <td>
@@ -362,7 +381,7 @@ Plus any of:
     </tr>
     <tr>
       <td><code>url</code></td>
-      <td>String</td>
+      <td>String | Array</td>
       <td>Full URL of the page.</td>
       <td><code>"^https?//.+\\.wordpress\\.com"</code></td>
     </tr>
@@ -379,12 +398,22 @@ Plus any of:
       <td><code>{ "generator": "^WordPress$" }</code></td>
     </tr>
     <tr>
-      <td><code>scripts</code></td>
+      <td><code>scriptSrc</code></td>
       <td>String | Array</td>
       <td>
         URLs of JavaScript files included on the page.
       </td>
       <td><code>"jquery\\.js"</code></td>
+    </tr>
+    <tr>
+      <td><code>scripts</code></td>
+      <td>String | Array</td>
+      <td>
+        JavaScript source code. Inspects inline and external scripts. For performance reasons, avoid
+        <code>scripts</code> where possible and use
+        <code>js</code> instead.
+      </td>
+      <td><code>"function webpackJsonpCallback\\(data\\) {"</code></td>
     </tr>
   </tbody>
 </table>
@@ -432,7 +461,7 @@ Tags (a non-standard syntax) can be appended to patterns (and implies and exclud
         syntax.
       </td>
       <td>
-        <code>"scripts": "jquery-([0-9.]+)\.js\\;version:\\1"</code>
+        <code>"scriptSrc": "jquery-([0-9.]+)\.js\\;version:\\1"</code>
       </td>
     </tr>
   </tbody>

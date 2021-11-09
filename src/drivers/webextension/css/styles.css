@@ -203,6 +203,8 @@ small {
   letter-spacing: .5px;
   padding: 1rem 1.5rem .8rem 1.5rem;
   text-transform: uppercase;
+  white-space: nowrap;
+  position: relative;
 }
 
 .tab--disabled {
@@ -232,6 +234,7 @@ small {
   flex: 1;
   padding: 0 1.5rem;
   margin-bottom: -3px;
+  line-height: 1rem;
 }
 
 .credits--hidden {
@@ -330,11 +333,11 @@ small {
   background: var(--color-primary-lighten)
 }
 
-.pro-configure {
+.plus-configure {
   margin: 1.5rem;
 }
 
-.pro-configure--hidden {
+.plus-configure--hidden {
   display: none;
 }
 
@@ -363,40 +366,40 @@ small {
   text-align: right;
 }
 
-.pro-configure__form {
+.plus-configure__form {
   background: var(--color-primary-lighten);
   border-radius: 4px;
   color: var(--color-primary);
   padding: 1rem 1.5rem;
 }
 
-.pro-empty {
+.plus-empty {
   text-align: center;
   padding: 4rem 1.5rem;
 }
 
-.pro-empty--hidden {
+.plus-empty--hidden {
   display: none;
 }
 
-.pro-crawl {
+.plus-crawl {
   text-align: center;
   padding: 4rem 1.5rem;
 }
 
-.pro-crawl--hidden {
+.plus-crawl--hidden {
   display: none;
 }
 
-.pro-error {
+.plus-error {
   margin: 1.5rem;
 }
 
-.pro-error--hidden {
+.plus-error--hidden {
   display: none;
 }
 
-.pro-error__message {
+.plus-error__message {
   border: 1px solid var(--color-error);
   border-radius: 4px;
   color: var(--color-error);
@@ -588,13 +591,30 @@ body.dynamic-icon .category__heading:hover .category__pin {
   vertical-align: middle;
 }
 
-.technology__link, .technology__link:active, .technology__link:hover {
+.technology__link {
   align-items: center;
   display: flex;
   overflow: hidden;
   padding: .1rem 0;
   text-decoration: none;
   width: 200px;
+}
+
+.technology__link:active, .technology__link:hover {
+  align-items: center;
+  display: flex;
+  overflow: hidden;
+  padding: .1rem 0;
+  text-decoration: none;
+  width: 200px;
+}
+
+.technology__link:active .technology__name, .technology__link:hover .technology__name {
+  text-decoration: none;
+}
+
+.technology__link:active .technology__icon, .technology__link:hover .technology__icon {
+	box-shadow: 0px 2px 1px -3px rgba(0, 0, 0, 0.2), 0px 1px 1px 0px rgba(0, 0, 0, 0.14), 0px 1px 3px 0px rgba(0, 0, 0, 0.12);
 }
 
 .technology__name {
@@ -809,7 +829,7 @@ body.dynamic-icon .category__heading:hover .category__pin {
   color: white;
 }
 
-.dark .pro-configure__form {
+.dark .plus-configure__form {
   background: var(--color-primary);
   color: var(--color-text-dark);
 }
@@ -848,10 +868,12 @@ body.dynamic-icon .category__heading:hover .category__pin {
 
 .dark .technology__name {
   opacity: .8;
+  text-decoration: underline;
 }
 
-.dark .technology__name:hover {
+.dark .technology__link:active .technology__name,  .dark .technology__link:hover .technology__name {
   opacity: 1;
+  text-decoration: underline;
 }
 
 .dark .technology__icon {

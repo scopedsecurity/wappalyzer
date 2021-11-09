@@ -25,14 +25,13 @@
 	"createAlert":                     { "message": "이 웹 사이트에 대한 알림 받기" },
   "leadLists":                       { "message": "잠재 고객 발굴 툴" },
   "tabTechnologies":                 { "message": "기술" },
-  "tabPro":                          { "message": "더 보기" },
-  "creditBalance":                   { "message": "소유 크레딧:" },
-  "proMessageHeading":               { "message": "PRO 기능 해제하기" },
-  "proMessage":                      { "message": "PRO 플랜에 가입하면 방문하는 웹 사이트의 회사 및 연락처 정보를 볼 수 있습니다." },
-  "proButton":                       { "message": "플랜 비교하기" },
-  "proInfo":                         { "message": "더 알아보기" },
-  "proEmpty":                        { "message": "결과가 없습니다." },
-  "proCrawl":                        { "message": "결과가 없습니다, 잠시 후에 확인해주세요." },
+  "tabPlus":                         { "message": "More info" },
+  "creditBalance":                   { "message": "Credits:" },
+  "plusMessageHeading":              { "message": "Get Plus for $$5/mo" },
+  "plusMessage":                     { "message": "With Plus, company and contact details of websites you visit are shown here." },
+  "plusButton":                      { "message": "Sign up" },
+  "plusEmpty":                       { "message": "No results found." },
+  "plusCrawl":                       { "message": "No results found, please check back later." },
   "formSave":                        { "message": "저장" },
 
   "setCompany":                      { "message": "회사 정보" },
@@ -188,5 +187,9 @@
 	"categoryName92":                  { "message": "Performance" },
 	"categoryName93":                  { "message": "Reservations & delivery" },
 	"categoryName94":                  { "message": "Referral marketing" },
-	"categoryName95":                  { "message": "Digital asset management" }
+	"categoryName95":                  { "message": "Digital asset management" },
+	"categoryName96":                  { "message": "Content curation" },
+	"categoryName97":                  { "message": "Customer data platform" },
+	"categoryName98":                  { "message": "Cart abandonment" },
+	"categoryName99":                  { "message": "Shipping carriers" }
 }
